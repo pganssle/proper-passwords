@@ -4,12 +4,10 @@ Library for arbitrary Markov chain generation
 @author Paul J. Ganssle
 @since 2014-04
 '''
-import re, json, os
+import re, json, os, random
 import input_validation
-from exception_helper import OutOfSyncError
-from exception_helper import FileExists
-from settings_helper import SettingsHelper
-from settings_helper import SettingsReader
+from exception_helper import OutOfSyncError, FileExists, RandomnessSourceUndefined
+from settings_helper import SettingsHelper, SettingsReader
 
 _markov_ext = '.mjson'      # Markov JSON
 
@@ -36,6 +34,7 @@ class MarkovDB:
     _included_states = 0
     _valid_source = False
     _db_generated = False
+    _rng = None
     name = ''
 
     # Methods
@@ -87,6 +86,7 @@ class MarkovDB:
         self._source = source
         self.min_state_length=min_state_length
         self.max_state_length=max_state_length
+        self._rng = random.SystemRandom()
     
     def generate(self):
         '''
@@ -198,6 +198,40 @@ class MarkovDB:
         self._db_generated = True
         self._valid_source = True
 
+    def get_chain(self, num_states):
+        '''
+        Generate a Markov chain with length num_states
+        '''
+        pass
+
+    # Private methods
+    def _get_next_state(self, state):
+        '''
+        Given a state, randomly choose a next state, drawn randomly from the possible choices.
+
+        @param state A valid state.
+
+        @return Returns another state.
+
+        @throws InvalidMarkovStateError Thrown when an invalid state is passed.
+        '''
+        if state not in self._state_index:
+            raise InvalidMarkovStateError('State '+repr(state)+' is not in the database.')
+
+        if self._rng is None:
+            raise RandomnessSourceUndefined('Cannot generate Markov chain without '+\
+                                            'randomness source.')
+
+        state_pos = self._state_index.index(state)
+        source_pos = self._rng.choice(self._state_positions[state_pos])
+        source_pos += len(self._state_index[state_pos]) # Move to the next state
+        
+        # States have a random length, so select one of the possible lengths.
+        # randrange(x, y) generates random numbers in the range [x,y), so add 1 to max length
+        state_length = self._rng.randrange(self.min_state_length, self.max_state_length+1)
+
+        return self._source[source_pos:source_pos+state_length]
+
     def _add_state(self, state, position):
         '''
         Adds a state to the source index, etc.
@@ -234,6 +268,12 @@ class MarkovDB:
 
 
 # Exceptions
+class InvalidMarkovStateError(KeyError):
+    '''
+    Raised if an invalid Markov state is requested.
+    '''
+    pass
+
 class InvalidMarkovSourceError(Exception):
     '''
     Raised if trying to use an invalid Markov source.

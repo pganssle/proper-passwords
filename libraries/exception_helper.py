@@ -16,3 +16,9 @@ class FileExists(IOError):
 	Error raised if a file exists.
 	'''
 	pass
+
+class RandomnessSourceUndefined(Exception):
+	'''
+	Raised when no source of randomness has been defined.
+	'''
+	pass
