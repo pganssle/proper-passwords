@@ -5,7 +5,8 @@ Library for arbitrary Markov chain generation
 @since 2014-04
 '''
 import re
-from new_exceptions import OutOfSyncError
+from exception_helper import OutOfSyncError
+from settings_helper import SettingsReader
 
 class MarkovDB:
     '''
@@ -36,7 +37,8 @@ class MarkovDB:
         '''
         The constructor for the class.
         
-        @param name The name of the database. This will be used for file saving, so special characters are not allowed.
+        @param name The name of the database. This will be used for file saving, so special 
+                    characters are not allowed.
         @type name str
 
         @param source An ordered list of states to be used in the Markov chain.
@@ -62,7 +64,8 @@ class MarkovDB:
             raise TypeError('Source must be an ordered list or string.')
 
         if re.match('^[\w_ -]+$', name) is None:
-            raise ValueError('"name" can only contain alphanumeric characters, spaces, dashes and underscores.')
+            raise ValueError('"name" can only contain alphanumeric characters, spaces, dashes '+\
+                             ' and underscores.')
 
         if min_state_length < 1:
             raise ValueError('min_state_length must be a positive integer.')
@@ -78,8 +81,8 @@ class MarkovDB:
     
     def generate(self):
         '''
-        Generates the Markov database from the source by finding each unique state in the source and adding it to the
-        _state_* attributes.
+        Generates the Markov database from the source by finding each unique state in the source and
+        adding it to the _state_* attributes.
         '''
         
         # Start by finding each unique state in the source and adding it to the "state" attributes.
@@ -96,23 +99,26 @@ class MarkovDB:
 
     def save(self, save_location=None):
         '''
-        Save the database to a file so that it does not need to be regenerated each time. It is not yet clear what
-        format will be used for this.
+        Save the database to a json file so that it does not need to be generated from the source 
+        with each new instance.
 
         @param save_location The directory into which the file should be saved. [Default: None]
         @type save_location str
 
-        @throws NotImplementedError This is not currently implemented.
         @throws TypeError Raised when argument inputs are of the wrong type.
         '''
-        raise NotImplementedError('Saving databases has not yet been implemented.')
 
+        if save_location is None:
+            # Use the default location, check the settings file.
+
+
+        
     def load(self, file_path=None):
         '''
         Load a saved database from file.
 
-        @param file_path The path of the file to load. If None, this will be generated from the default save location 
-                         and the name passed to the constructor.
+        @param file_path The path of the file to load. If None, this will be generated from the 
+                         default save location and the name passed to the constructor.
         @type file_path str
 
         @throws NotImplementedError This is not currently implemented.
@@ -128,7 +134,7 @@ class MarkovDB:
         @param state A state, either a list or a single item.
         @param position The position of the state in the source.
 
-        @raise OutOfSyncError Raised if somehow the _state_* attributes are out of sync.
+        @throws OutOfSyncError Raised if somehow the _state_* attributes are out of sync.
         '''
 
         try:
@@ -137,7 +143,8 @@ class MarkovDB:
             # ValueError is thrown if the state is not in the state index, so add it.
             
             # First check that all three state functions are in sync.
-            if not (len(self._state_index) == len(self._state_positions) == len(self._state_occurances)):
+            if not (len(self._state_index) == len(self._state_positions) == \
+                    len(self._state_occurances)):
                 raise OutOfSyncError('State attributes don\'t have identical lengths.')
                 
             # Add the state to the _state attributes
