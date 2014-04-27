@@ -5,6 +5,7 @@ Library for arbitrary Markov chain generation
 @since 2014-04
 '''
 import re
+from new_exceptions import OutOfSyncError
 
 class MarkovDB:
     '''
@@ -23,7 +24,10 @@ class MarkovDB:
 
     # Private variables
     _source = None
-    _sourceDB = None
+    _state_index = []
+    _state_positions = []
+    _state_occurances = []
+    _included_states = 0
     _databaseCompiled = False
     _name = ''
 
@@ -57,7 +61,7 @@ class MarkovDB:
         if not isinstance(source, (str, list, tuple, dict)):
             raise TypeError('Source must be an ordered list or string.')
 
-        if re.match('^[\w_- ]+$', string) is None:
+        if re.match('^[\w_ -]+$', name) is None:
             raise ValueError('"name" can only contain alphanumeric characters, spaces, dashes and underscores.')
 
         if min_state_length < 1:
@@ -67,18 +71,28 @@ class MarkovDB:
             raise ValueError('max_state_length must be a positive integer.')
 
         # Construct the object
-        self.__name = name
-        self.__source = source
+        self._name = name
+        self._source = source
         self.min_state_length=min_state_length
         self.max_state_length=max_state_length
     
     def generate(self):
         '''
-        Generates the Markov database from the source.
-
-        @throws NotImplementedError This is not currently implemented. This will change soon.
+        Generates the Markov database from the source by finding each unique state in the source and adding it to the
+        _state_* attributes.
         '''
-        raise NotImplementedError('Database generation has not yet been implemented.') 
+        
+        # Start by finding each unique state in the source and adding it to the "state" attributes.
+        for ii in range(0, len(self._source)):
+            # Each state can include a number of entries in the source
+            for jj in range(self.min_state_length, self.max_state_length+1):
+                # Stop if we hit the end of the source entry. 
+                if ii + jj >= len(self._source):
+                    break
+
+                # Generate a state from the source then call the _add_state method
+                state = self._source[ii:ii+jj]
+                self._add_state(state, ii)
 
     def save(self, save_location=None):
         '''
@@ -107,4 +121,36 @@ class MarkovDB:
         '''
         raise NotImplementedError('Loading databases has not yet been implemented.')
 
+    def _add_state(self, state, position):
+        '''
+        Adds a state to the source index, etc.
+
+        @param state A state, either a list or a single item.
+        @param position The position of the state in the source.
+
+        @raise OutOfSyncError Raised if somehow the _state_* attributes are out of sync.
+        '''
+
+        try:
+            state_pos = self._state_index.index(state)
+        except ValueError:
+            # ValueError is thrown if the state is not in the state index, so add it.
+            
+            # First check that all three state functions are in sync.
+            if not (len(self._state_index) == len(self._state_positions) == len(self._state_occurances)):
+                raise OutOfSyncError('State attributes don\'t have identical lengths.')
+                
+            # Add the state to the _state attributes
+            self._state_index.append(state)
+            state_pos = len(self._state_index)-1
+
+            # These two are empty because they are updated later
+            self._state_positions.append([])
+            self._state_occurances.append(0)
+
+        # If this exact position has already been added to the database, don't do anything.
+        if position not in self._state_positions[state_pos]:
+            self._state_positions[state_pos].append(position)
+            self._state_occurances[state_pos] += 1
+            self._included_states += 1
       
