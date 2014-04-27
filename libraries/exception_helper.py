@@ -10,3 +10,9 @@ class OutOfSyncError(Exception):
 	Error raised if a class with synchronized variables somehow becomes out of sync.
 	'''
 	pass
+
+class FileExists(IOError):
+	'''
+	Error raised if a file exists.
+	'''
+	pass
