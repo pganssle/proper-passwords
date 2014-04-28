@@ -32,20 +32,9 @@ class MarkovDB:
     
     __db_version__ = 0.1                        # Include for future compatibility.
 
-    # Private variables
-    _source = None
-    _source_by_state = []           # States beginning at each position in the source.
-    _state_index = []
-    _state_positions = []
-    _state_occurances = []
-    _included_states = 0
-    _valid_source = False
-    _db_generated = False
-    _rng = None
-    name = ''
-
     # Methods
-    def __init__(self, name, source=None, min_state_length=1, max_state_length=1):
+    def __init__(self, name, source=None, min_state_length=1, max_state_length=1,
+                       delimiter=None):
         '''
         The constructor for the class.
         
@@ -54,7 +43,7 @@ class MarkovDB:
         @type name str
 
         @param source An ordered list of states to be used in the Markov chain.
-        @type source (str, list, tuple, dict)
+        @type source (str, unicode, list, tuple, dict)
         
         @param min_state_length The minimum number of consecutive entries in the source which can 
                                 be considered a single state.
@@ -63,6 +52,11 @@ class MarkovDB:
         @param max_state_length The maximum number of consecutive entries in the source that can
                                  be considered a single state.
         @type max_state_length int
+
+        @param delimiter Delimiter marks the end of a given state (space for words, . for sentences,
+                          etc.) If None then no delimiter is used. The delimiter will be included in
+                          the states.
+        @type delimiter state 
 
         @throws TypeError Thrown if an invalid type is passed to one of the arguments.
         @throws ValueError Thrown if an invalid value is passed to one of the arguments.
@@ -80,13 +74,27 @@ class MarkovDB:
 
         if max_state_length < 1:
             raise ValueError('max_state_length must be a positive integer.')
+        
+        # Basic values
+        self._source = None
+        self._source_by_state = []           # States beginning at each position in the source.
+        self._state_index = []
+        self._state_delimited = []
+        self._state_positions = []
+        self._state_occurances = []
+        self._included_states = 0
+        self._valid_source = False
+        self._db_generated = False
+        self._rng = random.SystemRandom()
+        self._saved_loc = None
+        name = ''
 
         # Construct the object
         self.name = name
         if source is not None:
             self._add_source(source)
-        else:
-            self._valid_source = False
+
+        self._delimiter = delimiter
 
         self.min_state_length=min_state_length
         self.max_state_length=max_state_length
@@ -108,9 +116,10 @@ class MarkovDB:
         if not self._valid_source:
             raise InvalidMarkovSourceError('Valid source must be provided before '+\
                                            'generating database.')
+        
         # Set up the progress bar - basically approximate.
         if print_time:
-            current_time_millis = lambda: int(round(time.time() * 1000))    # SO/questions/5998245/
+            current_time_millis = lambda: int(round(time() * 1000))    # SO/questions/5998245/
             stime = current_time_millis()
 
         if print_progress:
@@ -127,7 +136,8 @@ class MarkovDB:
 
                 # Generate a state from the source then call the _add_state method
                 state = self._source[ii:ii+jj]
-                self._add_state(state, ii)
+                delimiter_found = self._add_state(state, ii)
+                
                 if print_progress:
                     kk += 1
                     c_prog = kk/prog_len
@@ -137,6 +147,10 @@ class MarkovDB:
                         stdout.write(char_set[csi%2]);    csi += 1
                         stdout.flush()
 
+                # Break if we've hit a delimiter.
+                if delimiter_found:
+                    break
+
         # Print a newline at the end if we're printing the progress.
         if print_progress:
             if csi%2 == 1:
@@ -144,17 +158,17 @@ class MarkovDB:
             stdout.write('\n')
 
         if print_time:
-            time_elapsed = (current_time_millis - stime)/1000.0;
+            time_elapsed = (current_time_millis() - stime)/1000.0;
             hours = int(time_elapsed/3600); time_elapsed -= hours*3600
             minutes = int(time_elapsed/60); time_elapsed -= minutes*60
             seconds = time_elapsed
             if hours > 0:
-                stdout.write('{0.0f}h '.format(hours))
+                stdout.write('{:0.0f}h '.format(hours))
             if minutes > 0:
-                stdout.write('{0.0f}m '.format(minutes))
+                stdout.write('{:0.0f}m '.format(minutes))
 
-            stdout.write('{02.3f}s\n'.format(seconds))
-            
+            stdout.write('{:02.3f}s\n'.format(seconds))
+
         self._db_generated = True
 
     def save(self, save_location=None, overwrite=True):
@@ -172,8 +186,13 @@ class MarkovDB:
             raise InvalidMarkovSourceError('Markov source must be valid before saving to file.')
 
         if save_location is None:
-            # Use the default location, check the settings file.
-            save_location = SettingsReader().getValue(SettingsHelper.markov_source_loc_key)
+            if self._saved_loc is not None and os.path.exists(self._saved_loc):
+                # Use the previous saving location if this has been saved before and 
+                # the file is still there.
+                save_location = os.path.dirname(self._saved_loc)
+            else:
+                # Else use the default location, check the settings file.
+                save_location = SettingsReader().getValue(SettingsHelper.markov_source_loc_key)
 
         save_file_path = os.path.join(save_location, self.name+_markov_ext)
         if not overwrite and os.path.exists(save_file_path):
@@ -184,12 +203,13 @@ class MarkovDB:
         markov_dict['version'] = self.__db_version__
         markov_dict['name'] = self.name
         markov_dict['source'] = self._source
-        markov_dict['valid source'] = self._valid_source
+        markov_dict['valid_source'] = self._valid_source
         markov_dict['db_generated'] = self._db_generated
         markov_dict['source_by_state'] = self._source_by_state
         markov_dict['state_index'] = self._state_index
         markov_dict['state_positions'] = self._state_positions
         markov_dict['state_occurances'] = self._state_occurances
+        markov_dict['state_delimited'] = self._state_delimited
         markov_dict['included_states'] = self._included_states
 
         # Save the file with JSON
@@ -200,6 +220,8 @@ class MarkovDB:
             json.dump(markov_dict, fp=save_file,
                 indent=4,
                 separators=(',', ': '))
+
+        self._saved_loc = save_file_path
 
         
     def load(self, file_path=None):
@@ -214,7 +236,11 @@ class MarkovDB:
         @throws ValueError Raised when an invalid path is passed to file_path
         '''
         if file_path is None:
-            file_path = os.path.join(SettingsReader().getValue(\
+            if os.path.exists(self._saved_loc):
+                # For recalling a previous state.
+                file_path = self._saved_loc
+            else:
+                file_path = os.path.join(SettingsReader().getValue(\
                                      SettingsHelper.markov_source_loc_key), self.name+_markov_ext)
 
         # Raise an error if this is an invalid string type.
@@ -232,20 +258,19 @@ class MarkovDB:
             if self._valid_source:
                 self._add_source(markov_dict['source'])
     
-            self._db_generated['db_generated']
+            self._db_generated = markov_dict['db_generated']
 
             if self._db_generated:
                 self._source_by_state = markov_dict['source_by_state']
                 self._state_index = markov_dict['state_index']
                 self._state_occurances = markov_dict['state_occurances']
                 self._included_states = markov_dict['included_states']
+                self._state_delimited = markov_dict['state_delimited']
 
         except KeyError as ke:
-            raise InvalidMarkovDatabaseFile('Error reading Markov file.', ke=ke)
+            raise InvalidMarkovDatabaseFile('Error reading Markov file key '+ke.args[0], ke=ke)
 
-        # Assuming this wasn't a malformed file, these are true as well.
-        self._db_generated = True
-        self._valid_source = True
+        self._saved_loc = file_path
 
     def get_chain(self, num_states, 
                         seed=None, random_seed_weighted=False,
@@ -295,7 +320,8 @@ class MarkovDB:
                                                 'generation.')
 
             if random_seed_weighted:
-                seed = self._rng.choice(self._rng.choice(self._source_by_state))
+                seed_index = self._rng.choice(self._rng.choice(self._source_by_state))
+                seed = self._state_index[seed_index]
             else:
                 seed = self._rng.choice(self._state_index)
 
@@ -307,9 +333,11 @@ class MarkovDB:
         chain = [seed]
         c_state = seed
         for ii in range(1, num_states):
-            c_state = self._get_next_state(c_state)
-            if c_state is None:
-                break           # This breaks the chain
+            c_state, index = self._get_next_state(c_state)
+
+            # Chain is broken if we reach the end of the source or if we reach a delimiter.
+            if c_state is None or self._state_delimited[index]:
+                break           
 
             chain.append(c_state)
 
@@ -361,11 +389,12 @@ class MarkovDB:
         Adds a source if no valid source is present.
 
         @param source A valid ordered list of some type.
-        @type source (str, list, dict, tuple)
+        @type source (str, unicode, list, dict, tuple)
         '''
         # Input Validation
-        if not isinstance(source, (str, list, tuple, dict)):
-            raise TypeError('Source must be an ordered list or string.')
+        if not isinstance(source, (str, unicode, list, tuple, dict)):
+            raise TypeError('Source must be an ordered list or string, given '+\
+                            type(source).__name__)
         
         self._source = cp(source)
         self._source_by_state = [[] for x in range(0, len(source))]
@@ -377,7 +406,7 @@ class MarkovDB:
 
         @param state A valid state.
 
-        @return Returns another state.
+        @return (state, state_index)
 
         @throws InvalidMarkovStateError Thrown when an invalid state is passed.
         '''
@@ -397,7 +426,8 @@ class MarkovDB:
         if source_pos > len(self._source_by_state) or len(self._source_by_state[source_pos]) < 1:
             return None
         else:                       # Unnecessary but preferred for aesthetic reasons.
-            return self._state_index[self._rng.choice(self._source_by_state[source_pos])]
+            state_index = self._rng.choice(self._source_by_state[source_pos])
+            return (self._state_index[state_index], state_index)
 
     def _add_state(self, state, position):
         '''
@@ -408,6 +438,8 @@ class MarkovDB:
 
         @throws OutOfSyncError Raised if somehow the _state_* attributes are out of sync.
         @throws KeyError Raised if position is invalid in the source.
+
+        @return Returns whether or not the state ends with the delimiter.
         '''
         if not 0 <= position < len(self._source):
             raise KeyError(repr(position)+' is not a valid index to the source.')
@@ -419,7 +451,7 @@ class MarkovDB:
             
             # First check that all three state functions are in sync.
             if not (len(self._state_index) == len(self._state_positions) == \
-                    len(self._state_occurances)):
+                    len(self._state_occurances) == len(self._state_delimited)):
                 raise OutOfSyncError('State attributes don\'t have identical lengths.')
                 
             # Add the state to the _state attributes
@@ -430,6 +462,13 @@ class MarkovDB:
             self._state_positions.append([])
             self._state_occurances.append(0)
 
+            # We'll assume that we don't have delimiters in the middle of the state, based on
+            # how .generate() works.
+            if self._delimiter is not None:
+                self._state_delimited.append(self._delimiter in state)
+            else:
+                self._state_delimited.append(False) # Never true with no delimiter
+
         # If this exact position has already been added to the database, don't do anything.
         if position not in self._state_positions[state_pos]:
             self._state_positions[state_pos].append(position)
@@ -438,6 +477,8 @@ class MarkovDB:
 
         if state_pos not in self._source_by_state[position]:
             self._source_by_state[position].append(state_pos)
+
+        return self._state_delimited[state_pos]
 
 
 # Exceptions
