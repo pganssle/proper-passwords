@@ -8,7 +8,10 @@ Library for arbitrary Markov chain generation
       unrelated projects.
 '''
 import re, json, os, random
+from time import time
+from sys import stdout
 import input_validation
+from copy import copy as cp
 from exception_helper import OutOfSyncError, FileExists, RandomnessSourceUndefined
 from settings_helper import SettingsHelper, SettingsReader
 
@@ -89,29 +92,69 @@ class MarkovDB:
         self.max_state_length=max_state_length
         self._rng = random.SystemRandom()
     
-    def generate(self):
+    def generate(self, print_progress=False, print_time=False):
         '''
         Generates the Markov database from the source by finding each unique state in the source and
         adding it to the _state_* attributes.
+
+        @param print_progress Print a progress bar as you are going [Default: False]
+        @type print_progress bool
+
+        @param print_time Print the time that the generation took.
+        @type print_time bool
 
         @throws InvalidMarkovSourceError Thrown when no valid source is present.
         '''
         if not self._valid_source:
             raise InvalidMarkovSourceError('Valid source must be provided before '+\
                                            'generating database.')
-        
+        # Set up the progress bar - basically approximate.
+        if print_time:
+            current_time_millis = lambda: int(round(time.time() * 1000))    # SO/questions/5998245/
+            stime = current_time_millis()
+
+        if print_progress:
+            prog_len = 1.0*len(self._source)*(self.max_state_length-self.min_state_length+1)
+            kk = 0; l_prog = -1; char_set = ('[', ']'); csi = 0
+
         # Start by finding each unique state in the source and adding it to the "state" attributes.
         for ii in range(0, len(self._source)):
             # Each state can include a number of entries in the source
             for jj in range(self.min_state_length, self.max_state_length+1):
                 # Stop if we hit the end of the source entry. 
-                if ii + jj >= len(self._source):
+                if ii + jj > len(self._source):
                     break
 
                 # Generate a state from the source then call the _add_state method
                 state = self._source[ii:ii+jj]
                 self._add_state(state, ii)
+                if print_progress:
+                    kk += 1
+                    c_prog = kk/prog_len
+                    if c_prog-l_prog >= 0.05:
+                        # Update every 5% 
+                        l_prog = round(c_prog*20)/20.0
+                        stdout.write(char_set[csi%2]);    csi += 1
+                        stdout.flush()
 
+        # Print a newline at the end if we're printing the progress.
+        if print_progress:
+            if csi%2 == 1:
+                stdout.write(']')
+            stdout.write('\n')
+
+        if print_time:
+            time_elapsed = (current_time_millis - stime)/1000.0;
+            hours = int(time_elapsed/3600); time_elapsed -= hours*3600
+            minutes = int(time_elapsed/60); time_elapsed -= minutes*60
+            seconds = time_elapsed
+            if hours > 0:
+                stdout.write('{0.0f}h '.format(hours))
+            if minutes > 0:
+                stdout.write('{0.0f}m '.format(minutes))
+
+            stdout.write('{02.3f}s\n'.format(seconds))
+            
         self._db_generated = True
 
     def save(self, save_location=None, overwrite=True):
@@ -324,7 +367,7 @@ class MarkovDB:
         if not isinstance(source, (str, list, tuple, dict)):
             raise TypeError('Source must be an ordered list or string.')
         
-        self._source = source
+        self._source = cp(source)
         self._source_by_state = [[] for x in range(0, len(source))]
         self._valid_source = True
 
