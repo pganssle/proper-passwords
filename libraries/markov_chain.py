@@ -319,7 +319,7 @@ class MarkovDB:
 
         state_pos = self._state_index.index(state)
         source_pos = self._rng.choice(self._state_positions[state_pos])
-        source_pos += 1     # Move to the next state in the source.
+        source_pos += len(self._state_index[state_pos])     # Move to the next state in the source.
         
         # Choose randomly from among the states starting at the next position (there will likely be
         # one for each state length.
