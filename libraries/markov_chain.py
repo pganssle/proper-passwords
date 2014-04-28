@@ -28,6 +28,7 @@ class MarkovDB:
 
     # Private variables
     _source = None
+    _source_by_state = []           # States beginning at each position in the source.
     _state_index = []
     _state_positions = []
     _state_occurances = []
@@ -84,6 +85,7 @@ class MarkovDB:
         # Construct the object
         self.name = name
         self._source = source
+        self._source_by_state = [[] for x in range(0, len(source))]
         self.min_state_length=min_state_length
         self.max_state_length=max_state_length
         self._rng = random.SystemRandom()
@@ -146,6 +148,7 @@ class MarkovDB:
         markov_dict['version'] = self.__db_version__
         markov_dict['name'] = self.name
         markov_dict['source'] = self._source
+        markov_dict['source_by_state'] = self._source_by_state
         markov_dict['state_index'] = self._state_index
         markov_dict['state_positions'] = self._state_positions
         markov_dict['state_occurances'] = self._state_occurances
@@ -188,6 +191,7 @@ class MarkovDB:
         try:
             self.name = markov_dict['name']
             self._source = markov_dict['source']
+            self._source_by_state = markov_dict['source_by_state']
             self._state_index = markov_dict['state_index']
             self._state_occurances = markov_dict['state_occurances']
             self._included_states = markov_dict['included_states']
@@ -198,11 +202,102 @@ class MarkovDB:
         self._db_generated = True
         self._valid_source = True
 
-    def get_chain(self, num_states):
+    def get_chain(self, num_states, seed=None, random_seed_weighted=False):
         '''
         Generate a Markov chain with length num_states
+        @todo Replace integer validation with centralized method.
+
+        @param num_states Number of states to be included in the chain.
+        @type int
+
+        @param seed The state with which to seed the state. If None is passed to this parameter, a 
+                    state will be selected randomly.
+        @type seed state
+
+        @param random_seed_weighted If set to True, a random position in the source is chosen and a 
+                                    a state is chosen from among those at this position. This only 
+                                    applies if seed is None. [Default: False]
+        @type random_seed_weighted bool
+
+        @return Returns a chain of states.
+        
+        @throws ValueError Thrown if num_states is not a positive integer.
+        @throws InvalidMarkovStateError Thrown if seed is not a valid state.
+        @throws MarkovDBNotGeneratedError Thrown if the Markov database has not been generated.
+        @throws InvalidMarkovSourceError Thrown if the source is not valid.
         '''
-        pass
+        # Validate inputs.
+        if num_states < 1:
+            raise ValueError('Number of states must be a positive integer.')
+
+        if not self._valid_source:
+            raise InvalidMarkovStateError('Source must be valid and database generated before ' + \
+                                          'a chain can be generated.')
+
+        if not self._db_generated:
+            raise MarkovDBNotGeneratedError('Markov database must be generated before a chain ' + \
+                                            'can be generated.')
+
+        # If we haven't been provided a state, choose one at random.
+        if seed is None:
+            if self._rng is None:
+                raise RandomnessSourceUndefined('Randomness source needed for Markov chain '+\
+                                                'generation.')
+
+            if random_seed_weighted:
+                seed = self._rng.choice(self._rng.choice(self._source_by_state))
+            else:
+                seed = self._rng.choice(self._state_index)
+
+        # Validate the seed.
+        if seed not in self._state_index:
+            raise InvalidMarkovStateError(repr(seed) + ' is not a valid state.')
+
+        # Generate the state
+        chain = [seed]
+        c_state = seed
+        for ii in range(1, num_states):
+            c_state = self._get_next_state(c_state)
+            if c_state is None:
+                break           # This breaks the chain
+            chain.append(c_state)
+
+        return chain
+
+    def get_chain_as_string(self, num_states, seed=None, random_seed_weighted=False):
+        '''
+        Call the get_chain method, then concatenate it to a string. This will only work if the 
+        source material is also made of strings.
+
+        @param num_states Number of states to be included in the chain.
+        @type int
+
+        @param seed The state with which to seed the state. If None is passed to this parameter, a 
+                    state will be selected randomly.
+        @type seed state
+
+        @param random_seed_weighted If set to True, a random position in the source is chosen and a 
+                                    a state is chosen from among those at this position. This only 
+                                    applies if seed is None. [Default: False]
+        @type random_seed_weighted bool
+
+        @return Returns a chain of states as a string.
+
+        @throws TypeError Thrown if the source is not made up of strings or characters.
+        @throws ValueError Thrown if num_states is not a positive integer.
+        @throws InvalidMarkovStateError Thrown if seed is not a valid state.
+        '''
+        chain = self.get_chain(num_states=num_states, 
+                               seed=seed, 
+                               random_seed_weighted=random_seed_weighted)
+
+        out_chain = ''
+        for state in chain:
+            input_validation.valid_string_type(state, throw_error=True)
+
+            out_chain += state
+
+        return out_chain
 
     # Private methods
     def _get_next_state(self, state):
@@ -224,13 +319,14 @@ class MarkovDB:
 
         state_pos = self._state_index.index(state)
         source_pos = self._rng.choice(self._state_positions[state_pos])
-        source_pos += len(self._state_index[state_pos]) # Move to the next state
+        source_pos += 1     # Move to the next state in the source.
         
-        # States have a random length, so select one of the possible lengths.
-        # randrange(x, y) generates random numbers in the range [x,y), so add 1 to max length
-        state_length = self._rng.randrange(self.min_state_length, self.max_state_length+1)
-
-        return self._source[source_pos:source_pos+state_length]
+        # Choose randomly from among the states starting at the next position (there will likely be
+        # one for each state length.
+        if source_pos > len(self._source_by_state) or len(self._source_by_state[source_pos]) < 1:
+            return None
+        else:                       # Unnecessary but preferred for aesthetic reasons.
+            return self._state_index[self._rng.choice(self._source_by_state[source_pos])]
 
     def _add_state(self, state, position):
         '''
@@ -240,7 +336,10 @@ class MarkovDB:
         @param position The position of the state in the source.
 
         @throws OutOfSyncError Raised if somehow the _state_* attributes are out of sync.
+        @throws KeyError Raised if position is invalid in the source.
         '''
+        if not 0 <= position < len(self._source):
+            raise KeyError(repr(position)+' is not a valid index to the source.')
 
         try:
             state_pos = self._state_index.index(state)
@@ -265,6 +364,9 @@ class MarkovDB:
             self._state_positions[state_pos].append(position)
             self._state_occurances[state_pos] += 1
             self._included_states += 1
+
+        if state_pos not in self._source_by_state[position]:
+            self._source_by_state[position].append(state_pos)
 
 
 # Exceptions
