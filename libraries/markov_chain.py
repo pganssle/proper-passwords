@@ -125,15 +125,9 @@ class MarkovDB:
 
         @throws TypeError Raised when argument inputs are of the wrong type.
         @throws InvalidMarkovSourceError Raised when no valid markov source is present.
-        @throws MarkovDBNotGeneratedError Raised when the Markov database has not been generated.
         '''
         if not self._valid_source:
-            raise InvalidMarkovSourceError('Markov source must be valid and the database must '+\
-                                           'generated before saving to file.')
-
-        if not self._db_generated:
-            raise MarkovDBNotGeneratedError('Markov database must be generated before '+\
-                                            'saving to file.')
+            raise InvalidMarkovSourceError('Markov source must be valid before saving to file.')
 
         if save_location is None:
             # Use the default location, check the settings file.
@@ -148,6 +142,8 @@ class MarkovDB:
         markov_dict['version'] = self.__db_version__
         markov_dict['name'] = self.name
         markov_dict['source'] = self._source
+        markov_dict['valid source'] = self._valid_source
+        markov_dict['db_generated'] = self._db_generated
         markov_dict['source_by_state'] = self._source_by_state
         markov_dict['state_index'] = self._state_index
         markov_dict['state_positions'] = self._state_positions
@@ -190,11 +186,17 @@ class MarkovDB:
             markov_dict = json.load(mdb_file)
         try:
             self.name = markov_dict['name']
-            self._source = markov_dict['source']
-            self._source_by_state = markov_dict['source_by_state']
-            self._state_index = markov_dict['state_index']
-            self._state_occurances = markov_dict['state_occurances']
-            self._included_states = markov_dict['included_states']
+            self._valid_source = markov_dict['valid_source']
+            if self._valid_source:
+                self._source = markov_dict['source']
+    
+            self._db_generated['db_generated']
+
+            if self._db_generated:
+                self._source_by_state = markov_dict['source_by_state']
+                self._state_index = markov_dict['state_index']
+                self._state_occurances = markov_dict['state_occurances']
+                self._included_states = markov_dict['included_states']
         except KeyError as ke:
             raise InvalidMarkovDatabaseFile('Error reading Markov file.', ke=ke)
 
