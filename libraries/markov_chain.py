@@ -7,7 +7,7 @@ Library for arbitrary Markov chain generation
 @todo Separate out the Settings stuff into a separate file so that this can be used independently in
       unrelated projects.
 '''
-import re, json, os, random
+import re, json, os, random, zlib
 from time import time
 from sys import stdout
 import input_validation
@@ -16,6 +16,7 @@ from exception_helper import OutOfSyncError, FileExists, RandomnessSourceUndefin
 from settings_helper import SettingsHelper, SettingsReader
 
 _markov_ext = '.mjson'      # Markov JSON
+_m_zip = '.mjson.gz'        # Compressed JSON.
 
 class MarkovDB:
     '''
@@ -87,8 +88,7 @@ class MarkovDB:
         self._db_generated = False
         self._rng = random.SystemRandom()
         self._saved_loc = None
-        name = ''
-
+        
         # Construct the object
         self.name = name
         if source is not None:
@@ -171,7 +171,7 @@ class MarkovDB:
 
         self._db_generated = True
 
-    def save(self, save_location=None, overwrite=True):
+    def save(self, save_location=None, overwrite=True, compress=True):
         '''
         Save the database to a json file so that it does not need to be generated from the source 
         with each new instance.
@@ -194,9 +194,10 @@ class MarkovDB:
                 # Else use the default location, check the settings file.
                 save_location = SettingsReader().getValue(SettingsHelper.markov_source_loc_key)
 
-        save_file_path = os.path.join(save_location, self.name+_markov_ext)
+        fext = _m_zip if compress else _markov_ext
+        save_file_path = os.path.join(save_location, self.name+fext)
         if not overwrite and os.path.exists(save_file_path):
-            raise FileExists('Markov database file '+self.name+_markov_ext+' already exists.')
+            raise FileExists('Markov database file '+self.name+fext+' already exists.')
 
         # Turn this into a dictionary for JSON serialization
         markov_dict = dict()
@@ -217,9 +218,14 @@ class MarkovDB:
             os.makedirs(os.path.dirname(save_file_path))
 
         with open(save_file_path, 'w+') as save_file:
-            json.dump(markov_dict, fp=save_file,
-                indent=4,
-                separators=(',', ': '))
+            if compress:
+                cdata = zlib.compress(json.dumps(markov_dict))
+                save_file.write(cdata)
+            else:
+                json.dump(markov_dict, fp=save_file,
+                    indent=4,
+                    separators=(',', ': '))
+
 
         self._saved_loc = save_file_path
 
@@ -240,8 +246,26 @@ class MarkovDB:
                 # For recalling a previous state.
                 file_path = self._saved_loc
             else:
+                base_fname = os.path.join(SettingsReader().getValue(\
+                    SettingsHelper.markov_source_loc_key), self.name)
+                
+                decompressed_file_exists = os.path.exists(base_fname+_markov_ext)
+                compressed_file_exists = os.path.exists(base_fname+_m_zip)
+
+                if decompressed_file_exists and compressed_file_exists:
+                    # Find out which one's newer.
+                    if os.path.getmtime(base_fname+_markov_ext) >= \
+                       os.path.getmtime(base_fname+_m_zip):
+                        fext = _markov_ext
+                    else:
+                        fext = _m_zip
+                elif decompressed_file_exists:
+                    fext = _markov_ext
+                else:
+                    fext = _m_zip
+                
                 file_path = os.path.join(SettingsReader().getValue(\
-                                     SettingsHelper.markov_source_loc_key), self.name+_markov_ext)
+                                     SettingsHelper.markov_source_loc_key), self.name+fext)
 
         # Raise an error if this is an invalid string type.
         input_validation.valid_string_type(file_path, throw_error=True) 
@@ -251,7 +275,11 @@ class MarkovDB:
 
         # Load the JSON file.
         with open(file_path, 'r') as mdb_file:
-            markov_dict = json.load(mdb_file)
+            if file_path.endswith(_m_zip):  # Compressed
+                ddata = zlib.decompress(mdb_file.read())
+                markov_dict = json.loads(ddata)
+            else:
+                markov_dict = json.load(mdb_file)
         try:
             self.name = markov_dict['name']
             self._valid_source = markov_dict['valid_source']
