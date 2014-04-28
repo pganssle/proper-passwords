@@ -3,6 +3,9 @@ Library for arbitrary Markov chain generation
 
 @author Paul J. Ganssle
 @since 2014-04
+
+@todo Separate out the Settings stuff into a separate file so that this can be used independently in
+      unrelated projects.
 '''
 import re, json, os, random
 import input_validation
@@ -65,13 +68,6 @@ class MarkovDB:
         # Validate the inputs
         input_validation.valid_string_type(name, throw_error=True)
 
-        if source is None:
-            self._valid_source = False
-        elif not isinstance(source, (str, list, tuple, dict)):
-            raise TypeError('Source must be an ordered list or string.')
-        else:
-            self._valid_source = True
-
         if re.match('^[\w_ -]+$', name) is None:
             raise ValueError('"name" can only contain alphanumeric characters, spaces, dashes '+\
                              ' and underscores.')
@@ -84,8 +80,11 @@ class MarkovDB:
 
         # Construct the object
         self.name = name
-        self._source = source
-        self._source_by_state = [[] for x in range(0, len(source))]
+        if source is not None:
+            self._add_source(source)
+        else:
+            self._valid_source = False
+
         self.min_state_length=min_state_length
         self.max_state_length=max_state_length
         self._rng = random.SystemRandom()
@@ -188,7 +187,7 @@ class MarkovDB:
             self.name = markov_dict['name']
             self._valid_source = markov_dict['valid_source']
             if self._valid_source:
-                self._source = markov_dict['source']
+                self._add_source(markov_dict['source'])
     
             self._db_generated['db_generated']
 
@@ -197,6 +196,7 @@ class MarkovDB:
                 self._state_index = markov_dict['state_index']
                 self._state_occurances = markov_dict['state_occurances']
                 self._included_states = markov_dict['included_states']
+
         except KeyError as ke:
             raise InvalidMarkovDatabaseFile('Error reading Markov file.', ke=ke)
 
@@ -204,7 +204,9 @@ class MarkovDB:
         self._db_generated = True
         self._valid_source = True
 
-    def get_chain(self, num_states, seed=None, random_seed_weighted=False):
+    def get_chain(self, num_states, 
+                        seed=None, random_seed_weighted=False,
+                        delimiter=None):
         '''
         Generate a Markov chain with length num_states
         @todo Replace integer validation with centralized method.
@@ -220,6 +222,9 @@ class MarkovDB:
                                     a state is chosen from among those at this position. This only 
                                     applies if seed is None. [Default: False]
         @type random_seed_weighted bool
+
+        @param delimiter Break if the chain encounters anything in this list. (Not implemented)
+        @type delimiter (str, list, set, tuple)
 
         @return Returns a chain of states.
         
@@ -262,11 +267,14 @@ class MarkovDB:
             c_state = self._get_next_state(c_state)
             if c_state is None:
                 break           # This breaks the chain
+
             chain.append(c_state)
 
         return chain
 
-    def get_chain_as_string(self, num_states, seed=None, random_seed_weighted=False):
+    def get_chain_as_string(self, num_states, 
+                            seed=None, random_seed_weighted=False, 
+                            delimiter=None):
         '''
         Call the get_chain method, then concatenate it to a string. This will only work if the 
         source material is also made of strings.
@@ -283,6 +291,9 @@ class MarkovDB:
                                     applies if seed is None. [Default: False]
         @type random_seed_weighted bool
 
+        @param delimiter Break if the chain encounters anything in this list. (Not implemented)
+        @type delimiter (str, list, set, tuple)
+        
         @return Returns a chain of states as a string.
 
         @throws TypeError Thrown if the source is not made up of strings or characters.
@@ -302,6 +313,21 @@ class MarkovDB:
         return out_chain
 
     # Private methods
+    def _add_source(self, source):
+        '''
+        Adds a source if no valid source is present.
+
+        @param source A valid ordered list of some type.
+        @type source (str, list, dict, tuple)
+        '''
+        # Input Validation
+        if not isinstance(source, (str, list, tuple, dict)):
+            raise TypeError('Source must be an ordered list or string.')
+        
+        self._source = source
+        self._source_by_state = [[] for x in range(0, len(source))]
+        self._valid_source = True
+
     def _get_next_state(self, state):
         '''
         Given a state, randomly choose a next state, drawn randomly from the possible choices.
